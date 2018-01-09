@@ -1,0 +1,66 @@
+---
+title: "Wearable Device Prediction"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+## Reading and Pruning the Data
+
+We read in the data and remove columns which are overwhelmingly missing. We also remove the index column and the cvtd_timestamp since raw timestamp should suffice.
+
+```{r}
+library(caret)
+traindata<- read.csv("pml-training.csv", na.strings="")
+traindata<- traindata[,c(2:4,5:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+spl<- split(traindata,traindata$user_name)
+```
+## Fitting a Random Forest
+
+We fit a random forest to the training data. For this purpose, we split the data into 6 sets, based on the `user_name`, in order to save on RAM and with the reasoning that each user has their own distinct behavior patterns.
+
+```{r}
+spltrain <- split(traindata,traindata$user_name)
+fitlst<- NULL
+for (i in 1:6) {
+  curfit<-train(classe~ ., data=spl[[i]],method="rf",prox=TRUE)
+  fitlst<- c(fitlst,list(curfit))
+}
+
+```
+
+Now we load the test data, split it into groups by `user_name`, predict using the appropriate model, and combine the results.
+
+```{r}
+library(dplyr)
+testdata<- read.csv("pml-testing.csv")
+spltest <- split(testdata,testdata$user_name)
+predtest<- NULL
+for (i in 1:6) {
+  spltest[[i]]$pred<-predict(fitlst[[i]],spltest[[i]])
+  predtest<-rbind(predtest,spltest[[i]])
+}
+predtest<- select(predtest,problem_id,pred)
+predtest<- arrange(predtest,problem_id)
+predtest
+```
+
+##Notes on cross-validation and out-of-sample error
+
+We use caret's built-in model selection, which uses re-sampling (bootstrapped) with 25 repetitions. We do this separately for each `user_name`. Caret's built-in training function also uses resampling to calculate the accuracy. Because we use resampling, the corresponding estimate of the error rate is likely smaller than the true out-of-sample error rate.
+
+Below, we calculate our approximation of the out-of-sample error rate by averaging across all `user_name`s.
+
+```{r}
+totrate <- 0
+for (i in 1:6){
+  totrate <- totrate + 1- max(fitlst[[i]]$results$Accuracy)
+}
+meanrate<- totrate/6
+meanrate
+```
+
+This, our estimation of the error rate is `r meanrate`
+
